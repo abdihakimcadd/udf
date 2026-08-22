@@ -16,29 +16,26 @@ async def run_pipeline(payload: PipelinePayload):
     
     print(f"🚀 Pipeline started for equipment {payload.equipmentId}")
     
-    # Agent 1: Download
+    # Agent 1: Download PDF from Supabase Storage
     result = await agent_1_downloader.run(payload.pdfUrl)
     if not result.success:
         await _log_failure(payload, f"Agent 1 (Download): {result.error}")
         return {"success": False, "error": result.error}
+    
     pdf_bytes = result.data
     print("✅ Agent 1: PDF downloaded")
     
-    # Agent 2: OCR
+    # Agent 2: Extract text using pdfplumber
     result = await agent_2_ocr.run(pdf_bytes)
     if not result.success:
         await _log_failure(payload, f"Agent 2 (OCR): {result.error}")
         return {"success": False, "error": result.error}
     
-    ocr_data = result.data
-    print(f"✅ Agent 2: Text extracted ({len(ocr_data['text'])} chars, vision={ocr_data['needs_vision']})")
+    extracted_text = result.data["text"]
+    print(f"✅ Agent 2: Text extracted ({len(extracted_text)} chars)")
     
-    # Agent 3: Date Parser
-    result = await agent_3_date_parser.run(
-        ocr_data["text"], 
-        ocr_data.get("images"), 
-        ocr_data.get("needs_vision", False)
-    )
+    # Agent 3: Parse date with GPT-4o (text only)
+    result = await agent_3_date_parser.run(extracted_text)
     if not result.success:
         await _log_failure(payload, f"Agent 3 (LLM): {result.error}")
         return {"success": False, "error": result.error}
@@ -46,7 +43,7 @@ async def run_pipeline(payload: PipelinePayload):
     parsed = result.data
     print(f"✅ Agent 3: Parsed date = {parsed.get('next_inspection_date')}")
     
-    # Agent 4: Validator
+    # Agent 4: Validate the parsed date
     result = await agent_4_validator.run(parsed)
     if not result.success:
         await _log_failure(payload, f"Agent 4 (Validator): {result.error}")
@@ -55,7 +52,7 @@ async def run_pipeline(payload: PipelinePayload):
     validated = result.data
     print(f"✅ Agent 4: Validated date = {validated['next_inspection_date']}")
     
-    # Agent 5: Supabase Writer
+    # Agent 5: Write back to Supabase
     result = await agent_5_supabase_writer.run(
         validated, 
         payload.equipmentId, 
@@ -70,11 +67,15 @@ async def run_pipeline(payload: PipelinePayload):
     print("✅ Agent 5: Saved to Supabase")
     print("🏁 Pipeline complete")
     
-    return {"success": True, "next_inspection_date": validated["next_inspection_date"]}
+    return {
+        "success": True, 
+        "next_inspection_date": validated["next_inspection_date"]
+    }
 
 async def _log_failure(payload: PipelinePayload, error_msg: str):
-    """Logs pipeline failure back to Supabase."""
+    """Logs pipeline failure back to Supabase ai_actions_log."""
     import httpx
+    
     SUPABASE_REST = f"{settings.SUPABASE_URL}/rest/v1"
     headers = {
         "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
