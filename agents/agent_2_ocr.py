@@ -1,47 +1,31 @@
-import fitz  # PyMuPDF
-import base64
-from io import BytesIO
+import pdfplumber
 from dataclasses import dataclass
 from .agent_1_downloader import AgentResult
 
 @dataclass
 class ExtractedContent:
     text: str
-    images: list  # base64 encoded page images for vision fallback
 
 async def run(pdf_bytes: bytes) -> AgentResult:
-    """Extracts text from PDF. If text is too short, prepares images for vision."""
+    """Extracts text from PDF using pdfplumber. No compilation needed."""
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text_parts = []
         
-        full_text = []
-        images = []
+        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text)
         
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            
-            # Extract text
-            text = page.get_text()
-            full_text.append(text)
-            
-            # Render page to image (for vision fallback)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better OCR
-            img_bytes = pix.tobytes("png")
-            images.append(base64.b64encode(img_bytes).decode("utf-8"))
+        combined_text = "\n".join(text_parts).strip()
         
-        combined_text = "\n".join(full_text).strip()
-        
-        # If text is too short/garbled, signal that vision is needed
         if len(combined_text) < 50:
             return AgentResult(
-                success=True, 
-                data={"text": combined_text, "images": images, "needs_vision": True}
+                success=False, 
+                error="PDF zawiera za mało tekstu — prawdopodobnie skan obrazu. Wymaga ręcznej weryfikacji."
             )
         
-        return AgentResult(
-            success=True, 
-            data={"text": combined_text, "images": images, "needs_vision": False}
-        )
+        return AgentResult(success=True, data={"text": combined_text})
         
     except Exception as e:
         return AgentResult(success=False, error=f"Błąd OCR: {str(e)}")
