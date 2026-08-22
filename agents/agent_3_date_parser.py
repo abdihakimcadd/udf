@@ -3,8 +3,8 @@ import httpx
 from .agent_1_downloader import AgentResult
 from config import settings
 
-async def run(text: str, images: list = None, needs_vision: bool = False) -> AgentResult:
-    """Uses GPT-4o to extract next inspection date from UDT document."""
+async def run(text: str) -> AgentResult:
+    """Uses GPT-4o to extract next inspection date from UDT document text."""
     
     system_prompt = """Jesteś ekspertem od dokumentów UDT (Urząd Dozoru Technicznego) w Polsce.
     Twoim zadaniem jest wyodrębnienie daty następnej inspekcji/terminu kolejnego badania z decyzji UDT.
@@ -23,24 +23,6 @@ async def run(text: str, images: list = None, needs_vision: bool = False) -> Age
     Daty w dokumentach UDT są zazwyczaj w formacie DD.MM.YYYY lub YYYY-MM-DD."""
     
     try:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Dokument UDT do analizy:\n\n{text}"}
-        ]
-        
-        # If text extraction was poor, use vision on first 3 pages
-        if needs_vision and images:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": "Przeanalizuj ten dokument UDT (zdjęcia stron) i znajdź datę następnej inspekcji."},
-                        *[{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}} for img in images[:3]]
-                    ]
-                }
-            ]
-        
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -50,7 +32,10 @@ async def run(text: str, images: list = None, needs_vision: bool = False) -> Age
                 },
                 json={
                     "model": "gpt-4o",
-                    "messages": messages,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Dokument UDT do analizy:\n\n{text}"}
+                    ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0.1
                 }
